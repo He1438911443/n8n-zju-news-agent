@@ -3,7 +3,7 @@
 > 🚀 **拒绝信息焦虑，不再错过任何重要通知。** 基于 n8n + DeepSeek + Notion 的自动化情报系统，专为浙大学子打造。
 
 ![项目演示图](images/demo.png) 
-![项目演示图](main_workflow/demo.png) 
+![项目演示图](images/main_workflow.png) 
 ## 📖 项目背景与初衷
 
 ### 😫 你的痛点，我都懂
