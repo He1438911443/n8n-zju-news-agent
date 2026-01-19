@@ -1,0 +1,108 @@
+{
+  "name": "ZJU - News Listener",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zju-edu-news",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "35a91547-55b9-4f97-b39c-9b494ac104c9",
+      "name": "ZJU - News Listener",
+      "webhookId": ""
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. 更安全地获取 Webhook 数据\n// 在 \"Run Once for All Items\" 模式下，$input.first().json 是获取第一个输入项的标准写法\nconst inputItem = $input.first();\nconst body = inputItem ? inputItem.json.body : {};\n\n// 2. 调试日志 (按 F12 打开浏览器控制台可以看到)\nconsole.log(\"🔥 [Code Debug] 收到的完整 Body:\", body);\n\n// 3. 检查 items 是否存在\nif (!body || !body.items || !Array.isArray(body.items)) {\n  console.log(\"❌ [Code Debug] 没有找到 items 数组，或格式错误\");\n  return [];\n}\n\nconsole.log(`✅ [Code Debug] 找到 ${body.items.length} 条新闻，准备拆分...`);\n\n// 4. 拆分数组并输出\nreturn body.items.map(news => {\n  // 打印每一条，检查字段名是否正确 (比如 title vs Title)\n  // console.log(\"新闻条目:\", news); \n  \n  return {\n    json: {\n      // 确保这里的 news.xxx 和你 Tampermonkey 脚本里的一模一样\n      title: news.title || \"默认标题(抓取失败)\", \n      link: news.link,\n      date: news.date,\n      fetchTime: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "8f1bcd70-dd41-49ee-8ccf-c0cd81a6b253",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "value": "YOUR_DATABASE_ID",
+          "mode": "id"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Title|title",
+              "title": "={{ $json.title }}"
+            },
+            {
+              "key": "URL|url",
+              "ignoreIfEmpty": true,
+              "urlValue": "={{ $json.link }}"
+            },
+            {
+              "key": "PubDate|rich_text",
+              "textContent": "={{ $json.date }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "05c778e5-2604-4975-a892-78a779985d4b",
+      "name": "Create a database page",
+      "retryOnFail": true,
+      "credentials": {
+        "notionApi": {
+          "id": "KtMV3zHmgeoRcCBI",
+          "name": "Notion account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "ZJU - News Listener": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Create a database page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    },
+  "versionId": "v1-clean",
+  "tags": []
+}

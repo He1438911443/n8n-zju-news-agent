@@ -1,0 +1,486 @@
+{
+  "name": "imformation",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        640,
+        480
+      ],
+      "id": "3d009960-41f6-4f04-9726-d9fd1147024d",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://www.zju.edu.cn/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "pageSize",
+              "value": "20"
+            },
+            {
+              "name": "page",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1488,
+        624
+      ],
+      "id": "68fb82ac-6a8f-412d-ac61-130848370e4d",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "options": {
+          "maxTokens": 8192
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        3088,
+        720
+      ],
+      "id": "4e7ad0dc-a85a-457f-89fd-e69f25858769",
+      "name": "DeepSeek Chat Model1",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "9jTgKXnJS0RvGznL",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Current Date: {{ new Date().toLocaleDateString('zh-CN') }}\n\nUser Preferences (Focus on these topics):\n{{ $('Build Preference String').first().json.preferenceString }}\n\nInput News Data:\n{{ $json.formattedNews }}\n\n=== TASK ===\nAnalyze the \"Input News Data\" and generate a structured JSON array. For each news item, return an object with these fields:\n\n1. \"title\": The original title (clean up any garbled text if necessary).\n2. \"link\": The original URL.\n3. \"source\": The source name (e.g., \"教务内网\", \"就业网\").\n4. \"category\": Classify into one of: [学术/科研, 实习/就业, 交换/留学, 教务通知, 讲座/活动, 其他].\n5. \"priority\": Integer (1, 2, or 3).\n   - 1 (High): Strongly matches User Preferences OR is urgent/has an upcoming deadline within 7 days.\n   - 2 (Medium): Partially matches preferences or general important university news.\n   - 3 (Low): Loose match or routine announcements.\n6. \"summary\": A 1-sentence summary. If the news mentions a specific deadline, time, or location, MUST include it. (e.g., \"截止日期为1月20日\", \"地点在紫金港\").\n7. \"reasoning\": Why did you give this priority? (e.g., \"匹配用户偏好'计算机'\", \"近期截止的交换项目\").\n\n=== OUTPUT FORMAT ===\nReturn ONLY the raw JSON array.\nExample:\n[\n  {\n    \"title\": \"...\",\n    \"link\": \"...\",\n    \"source\": \"...\",\n    \"category\": \"...\",\n    \"priority\": 1,\n    \"summary\": \"...\",\n    \"reasoning\": \"...\"\n  }\n]",
+        "options": {
+          "systemMessage": "=You are a highly intelligent news analysis API for Zhejiang University students. \nYour ONLY function is to process raw news data into a strictly structured JSON array.\n\nCRITICAL RULES:\n1. Output MUST be a valid JSON array.\n2. Do NOT use Markdown code blocks (no ```json or ```). Just return the raw array.\n3. Do NOT output any conversational text, explanations, or warnings.\n4. If the input news list is empty, return \"[]\".\n5. Use Chinese (Simplified) for all generated fields (summary, reasoning, category)."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        3008,
+        496
+      ],
+      "id": "c8f4ba6a-33c5-488e-a316-8ab60a41be36",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $json.body || $json.data;\n\n// 1. 抓取 JS 数组 main._newsJsonXXX = [...]\nconst regex = /main\\._newsJson\\d+\\s*=\\s*(\\[[\\s\\S]*?\\])/;\nconst match = html.match(regex);\n\nif (!match) {\n\treturn [{\n\t\tjson: {\n\t\t\tsuccess: false,\n\t\t\tmessage: \"未找到 main._newsJsonXXX\"\n\t\t}\n\t}];\n}\n\nlet jsArray = match[1];\n\nlet fixed = jsArray\n\n\t// 去除注释等特殊符号\n\t.replace(/\\/\\*[\\s\\S]*?\\*\\//g, '')\n\n\t// key: → \"key\":\n\t.replace(/(\\w+)\\s*:/g, '\"$1\":')\n\n\t// 去掉 JSON.stringify(`...`)\n\t.replace(/JSON\\.stringify\\(`([\\s\\S]*?)`\\)/g, '\"$1\"')\n\n\t// 单引号 → 双引号\n\t.replace(/'([^']*)'/g, '\"$1\"')\n\n\t// 删除 obj 尾逗号： { ... , }\n\t.replace(/,\\s*}/g, '}')\n\n\t// 删除 array 尾逗号（包括各种格式）\n\t.replace(/,\\s*\\]/g, ']')\n\t.replace(/,\\s*\\r?\\n\\s*\\]/g, ']')\n\t.replace(/,\\s*\\r?\\n*\\s*\\]/g, ']')\n\n\t// 删除空对象：{}, 或者 , {}\n\t.replace(/,\\s*\\{\\s*\\}/g, '')\n\t.replace(/\\{\\s*\\}/g, '');\n\n\n// 3. 尝试解析\nlet arr;\ntry {\n\tarr = JSON.parse(fixed);\n} catch (e) {\n\treturn [{\n\t\tjson: {\n\t\t\tsuccess: false,\n\t\t\tmessage: \"JSON 解析仍失败（打印 fixed 以继续调试）\",\n\t\t\terror: e.toString(),\n\t\t\trawFixed: fixed\n\t\t}\n\t}];\n}\n\n// 4. 清理并输出\nreturn arr\n\t.filter(item => item && item.title)\n\t.map(item => ({\n\t\tjson: {\n\t\t\ttitle: item.title,\n\t\t\tlink: item.href,\n\t\t\timage: item.image,\n\t\t\ttext: item.text,\n\t\t\tpubDate: item.time,\n\t\t\traw: item\n\t\t}\n\t}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        640
+      ],
+      "id": "0c9865c0-4bb0-4aca-adc7-847972496ba9",
+      "name": "求是新闻 Code"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. 获取 API 返回的记录\n// 注意：如果不确定上一个节点名，可以用 $input.all()[0].json.result.records\nconst records = $items(\"Career Lecture Request\")[0].json.result.records || [];\nconst today = new Date();\ntoday.setHours(0,0,0,0);\n\n// 2. 你的关键词设置\nconst keywords = [\"计算机\", \"香港\", \"互联网\", \"实习\", \"软件\", \"信息技术\"];\n\n// 3. 过滤 + 生成智能链接\nconst lectureNews = records\n  .filter(item => {\n    const date = new Date(item.xjhrq);\n    // 筛选条件：日期在今天之后 且 标题包含关键词\n    return !isNaN(date.getTime()) && date >= today && keywords.some(k => item.xjhmc.includes(k));\n  })\n  .map(item => {\n    // === 🔥 核心修复逻辑开始 ===\n    let url = \"\";\n    \n    // 情况 A: 数据完整，直接跳转到【岗位详情页】(ckXjhgwXq)\n    if (item.dwxxid && item.dwxxid !== \"null\") {\n        url = `https://www.career.zju.edu.cn/jyxt/sczp/xjhgl/ckXjhgwXq.zf?xjhbh=${item.xjhbh}&dwxxid=${item.dwxxid}`;\n    } \n    // 情况 B: 缺少单位ID，回退到【宣讲会岗位列表页】(ckXjhgw) - 去掉 Xq 和 dwxxid\n    else {\n        url = `https://www.career.zju.edu.cn/jyxt/sczp/xjhgl/ckXjhgw.zf?xjhbh=${item.xjhbh}`;\n    }\n    // === 🔥 核心修复逻辑结束 ===\n\n    return {\n      title: item.xjhmc,\n      link: url,\n      pubDate: item.xjhrq,\n      source: \"就业信息网\"\n    };\n  });\n\nreturn lectureNews.map(item => ({ json: item }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        192
+      ],
+      "id": "41bcdb09-13cb-4d29-adab-4f538838e35e",
+      "name": "ZJU Career Filter"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.career.zju.edu.cn/v5-api/jyxt/wzsy/getZhXjhQtListAjax.zf",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1488,
+        192
+      ],
+      "id": "16ee50f8-a979-4a21-8ae0-de2d60e8a31d",
+      "name": "Career Lecture Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. 获取所有输入条目 (使用 $input.all() 替代 $items()，更稳定)\nconst items = $input.all().map(item => item.json);\n\n// 如果没有新闻，直接返回空，避免发空邮件\nif (items.length === 0) {\n  return [{ json: { html: \"<h3>今日无相关新闻</h3>\", totalNews: 0 } }];\n}\n\n// 2. 修复 URL：根据来源或路径自动补全域名\nfunction fixUrl(link, source) {\n  if (!link) return link;\n  \n  // 去除空格\n  link = link.trim();\n\n  // 已经是完整 URL\n  if (link.startsWith(\"http://\") || link.startsWith(\"https://\")) {\n    return link;\n  }\n\n  // 交换项目（本科生院 ugrs）\n  if (source && source.includes(\"交换\")) {\n    return \"https://ugrs.zju.edu.cn\" + (link.startsWith(\"/\") ? \"\" : \"/\") + link;\n  }\n\n  // 就业信息网\n  if (source && source.includes(\"就业\")) {\n    return \"https://www.career.zju.edu.cn\" + (link.startsWith(\"/\") ? \"\" : \"/\") + link;\n  }\n\n  // 本科生院相对路径（如 /dwjlfwpt/xxxx）\n  if (link.startsWith(\"/dwjlfwpt\") || link.startsWith(\"/20\")) {\n    return \"https://ugrs.zju.edu.cn\" + (link.startsWith(\"/\") ? \"\" : \"/\") + link;\n  }\n\n  // 默认补大学官网域名\n  return \"https://www.zju.edu.cn\" + (link.startsWith(\"/\") ? \"\" : \"/\") + link;\n}\n\n// 应用 URL 修复\nitems.forEach(item => {\n  item.link = fixUrl(item.link, item.source);\n});\n\n// 3. 按优先级排序（数字越小优先级越高）\n// 使用 Number() 转换，防止 AI 偶尔输出字符串 \"1\" 导致排序失效\nconst sorted = items.sort((a, b) => {\n  const p1 = Number(a.priority) || 999;\n  const p2 = Number(b.priority) || 999;\n  return p1 - p2;\n});\n\n// 4. 按类别分组\nconst grouped = {};\nsorted.forEach(item => {\n  const cat = item.category || '其他';\n  if (!grouped[cat]) grouped[cat] = [];\n  grouped[cat].push(item);\n});\n\n// 5. 生成 HTML 报告\n// 🔥 关键修改：强制使用北京时间 (Asia/Shanghai)\n// 否则在云端服务器上运行可能会显示昨天的日期\nconst today = new Date().toLocaleDateString('zh-CN', { \n  timeZone: 'Asia/Shanghai',\n  year: 'numeric', \n  month: 'long', \n  day: 'numeric',\n  weekday: 'long'\n});\n\nlet html = `\n<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <style>\n    body { font-family: 'Microsoft YaHei', -apple-system, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }\n    .container { background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }\n    h1 { color: #003366; border-bottom: 3px solid #003366; padding-bottom: 15px; margin-top: 0; text-align: center; }\n    .date { color: #666; font-size: 14px; margin-bottom: 30px; text-align: center; background: #eef2f5; padding: 8px; border-radius: 4px; display: inline-block; width: 100%; box-sizing: border-box; }\n    \n    .category { margin-top: 35px; }\n    .category-title { background: #003366; color: #fff; padding: 8px 15px; font-weight: bold; border-radius: 4px 4px 0 0; display: inline-block; font-size: 15px; }\n    .category-content { border-top: 2px solid #003366; margin-top: -2px; padding-top: 15px; }\n    \n    .news-item { margin-bottom: 20px; padding: 15px; border: 1px solid #eee; border-radius: 6px; background: #fff; transition: all 0.2s; }\n    .news-item:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); transform: translateY(-2px); border-color: #ddd; }\n    \n    .priority-badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; margin-right: 8px; vertical-align: text-bottom; }\n    .priority-1 { background: #e63946; color: white; } /* 红色高亮 */\n    .priority-2 { background: #fca311; color: white; } /* 橙色中等 */\n    .priority-3 { background: #e9ecef; color: #495057; } /* 灰色普通 */\n    \n    .news-title { font-weight: bold; font-size: 17px; margin-bottom: 8px; line-height: 1.4; color: #2c3e50; }\n    .news-meta { font-size: 12px; color: #999; margin-bottom: 10px; display: flex; align-items: center; }\n    .source-tag { background: #f1f3f5; padding: 2px 6px; border-radius: 3px; margin-right: 10px; color: #495057; }\n    \n    .news-summary { margin: 12px 0; color: #555; font-size: 14px; background: #f8f9fa; padding: 10px; border-left: 3px solid #dee2e6; border-radius: 0 4px 4px 0; }\n    .news-link { display: inline-block; color: #0066cc; text-decoration: none; font-weight: 500; font-size: 14px; margin-top: 5px; }\n    .news-link:hover { text-decoration: underline; color: #004499; }\n    \n    .reasoning { font-size: 12px; color: #868e96; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #eee; font-style: italic; }\n    .footer { margin-top: 50px; text-align: center; color: #adb5bd; font-size: 12px; border-top: 1px solid #eee; padding-top: 20px; }\n  </style>\n</head>\n<body>\n<div class=\"container\">\n  <h1>🎓 浙江大学每日新闻简报</h1>\n  <div class=\"date\">📅 ${today}</div>\n`;\n\n// 遍历每个类别\nfor (const [category, newsItems] of Object.entries(grouped)) {\n  html += `\n  <div class=\"category\">\n    <div class=\"category-title\">${category}</div>\n    <div class=\"category-content\">\n  `;\n  \n  newsItems.forEach(item => {\n    // 兼容字符串 \"1\" 和数字 1\n    const pVal = Number(item.priority) || 3;\n    const priorityClass = `priority-${pVal}`;\n    \n    let priorityLabel = '普通';\n    if (pVal === 1) priorityLabel = '🔥 重要';\n    if (pVal === 2) priorityLabel = '⭐ 关注';\n\n    html += `\n    <div class=\"news-item\">\n      <div class=\"news-title\">\n        <span class=\"priority-badge ${priorityClass}\">${priorityLabel}</span>\n        ${item.title || '无标题'}\n      </div>\n      \n      <div class=\"news-meta\">\n        <span class=\"source-tag\">${item.source || '校内通知'}</span>\n      </div>\n\n      <div class=\"news-summary\">${item.summary || '暂无摘要'}</div>\n      \n      <div>\n        <a href=\"${item.link}\" class=\"news-link\" target=\"_blank\">🔗 点击查看详情 →</a>\n      </div>\n      \n      ${item.reasoning ? `<div class=\"reasoning\">💡 AI分析：${item.reasoning}</div>` : ''}\n    </div>\n    `;\n  });\n  \n  html += `</div></div>`;\n}\n\nhtml += `\n  <div class=\"footer\">\n    本报告由 n8n AI Agent 自动生成 • 共筛选出 ${items.length} 条相关资讯\n  </div>\n</div>\n</body>\n</html>\n`;\n\n// 6. 返回结果\nreturn [{\n  json: {\n    html: html,\n    totalNews: items.length,\n    subject: `浙大日报 (${today}) - ${items.length}条更新`, // 方便后面发邮件直接引用主题\n    date: today\n  }\n}];"
+      },
+      "id": "87c8593d-f56d-40a3-abbe-324a9340feec",
+      "name": "Format Daily Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3584,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "你的邮箱地址@example.com",
+        "subject": "=浙江大学每日新闻简报 - {{ new Date().toLocaleDateString(\"zh-CN\") }}",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "57bd5380-e4d9-4a8b-8f6d-e4b77a401f3c",
+      "name": "Send Daily Report Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3808,
+        496
+      ],
+      "webhookId": "289b5d83-6adc-4d16-b8b4-2044281b4f3a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GYbuAocVSPV88f7e",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "databaseId": {
+          "__rl": true,
+          "value": "请填入你的偏好数据库ID",
+          "mode": "id"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "e7ecf6ac-6034-41fc-9c71-895ca9b7a096",
+      "name": "Get User Preferences from Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        1488,
+        400
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "KtMV3zHmgeoRcCBI",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 你的 Notion V2 节点返回的数据已经被 n8n 扁平化，例如：\n// property_title, property_priority, property_enabled, property_category\n\nconst items = $items().map(i => i.json);\n\n// 1. 转为统一格式\nconst parsed = items.map(i => {\n  return {\n    name: i.property_title || i.name || \"未命名偏好\",\n    priority: i.property_priority ?? 999,\n    enabled: i.property_enabled ?? false,\n    category: i.property_category || \"\"\n  };\n});\n\n// 2. 只保留 enabled 的偏好\nconst enabledPrefs = parsed.filter(p => p.enabled);\n\n// 3. 按 priority 从小到大排序\nenabledPrefs.sort((a, b) => a.priority - b.priority);\n\n// 4. 生成偏好字符串（提供给 DeepSeek 的 prompt）\nlet preferenceString = \"\\n我的偏好包括（优先级从高到低）：\\n\";\n\nenabledPrefs.forEach(p => {\n  preferenceString += `${p.priority}) ${p.name}\\n`;\n});\n\n// 5. 输出\nreturn [\n  {\n    json: {\n      preferenceString,\n      parsedPreferences: enabledPrefs\n    }\n  }\n];\n\n"
+      },
+      "id": "7c7f6b7e-a4c7-42a9-bf6c-742a17fb7391",
+      "name": "Build Preference String",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================================\n// 🚀 万能通吃版：移除所有门槛，强行读取\n// ========================================================\n\nconst allItems = $input.all();\n\nlet finalNewsList = [];\nlet debugLog = []; // 用于记录未被识别的数据结构\n\n// 定义垃圾词\nconst junkKeywords = /^(无标题|未知标题|第一页|上一页|下一页|尾页|跳转|Go|More|更多|行政文件|日历活动|最新通知|重点提示|公示公告|Home|首页|当前位置)$/i;\n\nfor (const item of allItems) {\n  const json = item.json;\n\n  // 1. 跳过偏好设置数据 (不做处理)\n  if (json.preferenceString || json.parsedPreferences) {\n    continue;\n  }\n\n  // === 🔥 核心修改：无差别提取逻辑 ===\n  // 不管数据结构是 properties.Title 还是直接的 Title，全部尝试获取\n\n  // A. 尝试提取标题\n  // 按照可能性从高到低排列\n  let title = \n    // 情况1: Notion 标准结构\n    json.properties?.Title?.title?.[0]?.plain_text || \n    json.properties?.Name?.title?.[0]?.plain_text || \n    json.properties?.[\"标题\"]?.title?.[0]?.plain_text ||\n    // 情况2: Notion 简化结构 (Flattened) 或 外部新闻\n    json.Title || \n    json.title || \n    json.name || \n    json.Name || \n    \"\";\n\n  // B. 尝试提取链接\n  let link = \n    json.properties?.URL?.url || \n    json.properties?.Link?.url || \n    json.URL || \n    json.url || \n    json.link || \n    \"\";\n\n  // C. 尝试提取日期\n  let date = \n    json.properties?.PubDate?.rich_text?.[0]?.plain_text || \n    json.properties?.FetchTime?.created_time ||\n    json.PubDate || \n    json.pubDate || \n    json.date || \n    json.created_time || \n    \"\";\n\n  // === 🕵️‍♂️ 调试探针 ===\n  // 如果提取不到标题，记录一下它的样子，看看它到底是啥\n  if (!title) {\n     // 如果不是空对象，就记录下来 Keys\n     if (Object.keys(json).length > 0) {\n         debugLog.push(`无法识别: Keys=[${Object.keys(json).join(\",\")}]`);\n     }\n     continue;\n  }\n\n  // === 🛡️ 垃圾过滤 ===\n  // 如果标题在黑名单里，跳过\n  if (junkKeywords.test(title.trim()) || title.trim().length < 2) {\n      continue;\n  }\n// 2. 🚫 新增屏蔽：只要标题里有 \"公示名单\"，直接扔掉\n  // (这也涵盖了 \"【交流项目】【公示名单】\")\n  if (title.includes(\"公示名单\")) {\n      // debugLog.push(`屏蔽公示: ${title}`); // 可选：如果你想在debug里看到它被删了\n      continue;\n  }\n  // D. 存入列表\n  finalNewsList.push({\n    title: title.trim(),\n    link: link,\n    pubDate: date,\n    source: json.source || \"教务内网/Notion\", // 默认为内网\n    score: 1 // 默认给分\n  });\n}\n\n// === 去重 (链接相同则合并) ===\nconst uniqueMap = new Map();\nfinalNewsList.forEach(item => {\n    let key = item.link ? item.link.trim() : item.title;\n    if (!uniqueMap.has(key)) uniqueMap.set(key, item);\n});\nconst uniqueList = Array.from(uniqueMap.values());\n\n// === 排序 (新日期在前) ===\n// 简单按日期字符串降序\nuniqueList.sort((a, b) => (b.pubDate || \"\").localeCompare(a.pubDate || \"\"));\n\n// 截取前 50 条\nconst outputList = uniqueList.slice(0, 50);\n\nreturn [\n  {\n    json: {\n      formattedNews: JSON.stringify(outputList), \n      count: outputList.length,\n      // 如果还有没读出来的，这里会显示它们的结构特征\n      debugKeys: debugLog.slice(0, 5).join(\" | \"), \n      rawCount: allItems.length\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2784,
+        496
+      ],
+      "id": "5b1e26cb-ff75-4764-ab1c-1ec093522e52",
+      "name": "Combine News"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2016,
+        544
+      ],
+      "id": "f7ee5725-2715-4e95-b91d-15b87176298f",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "请填入你的新闻数据库ID",
+          "__regex": "^([0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12})"
+        },
+        "limit": 100,
+        "simple": false,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "key": "FetchTime|created_time",
+              "condition": "on_or_after",
+              "createdTimeValue": "={{ new Date(new Date().getTime() - 7 * 24 * 60 * 60 * 1000).toISOString() }}"
+            }
+          ]
+        },
+        "options": {
+          "sort": {
+            "sortValue": [
+              {
+                "timestamp": true,
+                "key": "created_time",
+                "direction": "descending"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        1520,
+        992
+      ],
+      "id": "e0379050-e200-4cf4-9769-56fa98dd6c0a",
+      "name": "Get Cached News",
+      "retryOnFail": true,
+      "credentials": {
+        "notionApi": {
+          "id": "KtMV3zHmgeoRcCBI",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. 获取原始内容 (兼容不同的 Agent 输出字段名)\nconst raw = $json.output || $json.text || $json.message || \"\";\n\nif (!raw) {\n  // 如果 AI 没说话，返回空数组，防止报错\n  return [];\n}\n\nlet jsonString = raw;\n\n// 2. 🔥 核心优化：使用正则提取第一个 [ ... ] 结构 🔥\n// 不管 AI 在 JSON 前面说了多少废话，或者在后面加了什么备注，\n// 我们只抓取最外层的方括号及其内容。\nconst match = raw.match(/\\[[\\s\\S]*\\]/);\nif (match) {\n  jsonString = match[0];\n}\n\n// 3. 清理残留的 Markdown 标记 (双重保险)\njsonString = jsonString.replace(/```json/g, \"\").replace(/```/g, \"\").trim();\n\n// 4. 解析 JSON\nlet arr;\ntry {\n  arr = JSON.parse(jsonString);\n} catch (e) {\n  // 如果解析失败，抛出带原始内容的错误，方便调试\n  throw new Error(\"解析失败，AI 输出的内容不是合法 JSON。原始内容：\" + raw);\n}\n\n// 5. 格式校验：确保拿到的一定是数组\nif (!Array.isArray(arr)) {\n  // 如果 AI 偶尔只返回了一个对象 {} 而不是数组 [{}]，帮它包一层\n  arr = [arr];\n}\n\n// 6. 输出\nreturn arr.map(item => ({ json: item }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        496
+      ],
+      "id": "df66f286-0e82-465d-99de-79b7d4a9f549",
+      "name": "clean AI"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Career Lecture Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get User Preferences from Notion",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Cached News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "求是新闻 Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "求是新闻 Code": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "clean AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Career Lecture Request": {
+      "main": [
+        [
+          {
+            "node": "ZJU Career Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ZJU Career Filter": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Report Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get User Preferences from Notion": {
+      "main": [
+        [
+          {
+            "node": "Build Preference String",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Preference String": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Combine News": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Combine News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Cached News": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "clean AI": {
+      "main": [
+        [
+          {
+            "node": "Format Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "5d828745-6970-46ed-aea8-44edf4f48a1b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": ""
+  },
+  "id": "TDJ4aVJt4yqZrnye",
+  "tags": []
+}
